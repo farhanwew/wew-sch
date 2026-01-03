@@ -1,0 +1,7 @@
+{
+  "name": "WEW Scholar",
+  "description": "An open-source alternative to Connected Papers and ResearchRabbit. Upload a paper, extract citations via Go backend APIs, and visualize your research landscape in an interactive D3.js graph.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
