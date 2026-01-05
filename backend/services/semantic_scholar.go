@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	SemanticScholarAPIURL = "https://api.semanticscholar.org/graph/v1/paper/search/bulk"
+	// Using regular search endpoint (not bulk) for better relevance ranking
+	SemanticScholarAPIURL = "https://api.semanticscholar.org/graph/v1/paper/search"
 )
 
 var httpClient = &http.Client{
@@ -30,7 +31,7 @@ func SearchPapers(query string, limit int, offset int) (models.PaperSearchResult
 	q.Add("limit", fmt.Sprintf("%d", limit))
 
 	q.Add("fields", "title,authors,year,abstract,citationCount,externalIds")
-	q.Add("sort", "citationCount:desc") // Sort by most cited first
+	// Note: regular /paper/search sorts by relevance by default (no sort param needed)
 	req.URL.RawQuery = q.Encode()
 
 	log.Printf("[DEBUG] Requesting: %s", req.URL.String())

@@ -1,0 +1,37 @@
+services:
+  # Backend API (Go)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - CORS_ORIGINS=http://localhost,http://localhost:80,http://frontend
+      - GIN_MODE=release
+      - S2_API_KEY=${S2_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/api/search?query=test"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend (React/Vite + Nginx)
+  frontend:
+    build:
+      context: ./wew-scholar
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:8000
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+# For production with custom domain, add:
+# networks:
+#   default:
+#     name: wewscholar-network
