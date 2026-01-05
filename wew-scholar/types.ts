@@ -5,6 +5,8 @@ export interface Paper {
   authors: string[];
   year: number;
   doi?: string;
+  pdfUrl?: string;
+  arxivId?: string;
   citationCount: number;
   abstract?: string;
   isPrimary?: boolean;

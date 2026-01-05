@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { Project, Paper } from './types';
+import { Project, Paper, GraphData } from './types';
 import GraphView from './components/GraphView';
 import Sidebar from './components/Sidebar';
 import ProjectList from './components/ProjectList';
@@ -105,22 +105,54 @@ const handleSearch = async (query: string) => {
     setPreviewPaper(null);
   };
 
-  const handleBuildGraph = (paper: Paper) => {
+  const handleBuildGraph = async (paper: Paper) => {
     setIsBuilding(true);
     console.log("Building graph for:", paper.title);
     
-    // Simulate graph building - replace with actual API call later
-    setTimeout(() => {
-      // Find the project containing this paper, or use first project
-      const project = MOCK_PROJECTS.find(p => 
-        p.graphData.nodes.some(n => n.id === paper.id)
-      ) || MOCK_PROJECTS[0];
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    
+    try {
+      const response = await fetch(
+        `${apiUrl}/api/paper/${paper.id}/graph?citations=20&references=20`
+      );
       
-      setActiveProject(project);
+      if (!response.ok) {
+        throw new Error('Failed to build graph');
+      }
+      
+      const data = await response.json();
+      
+      // Transform API response to match frontend types
+      // API returns { paper, graph: { nodes, edges } }
+      // Frontend expects { nodes, links }
+      const graphData: GraphData = {
+        nodes: data.graph.nodes,
+        links: data.graph.edges.map((edge: { source: string; target: string }) => ({
+          source: edge.source,
+          target: edge.target,
+          value: 1,
+        })),
+      };
+      
+      // Create a temporary project for this graph
+      const tempProject: Project = {
+        id: `temp-${paper.id}`,
+        name: paper.title,
+        description: `Citation graph for "${paper.title}"`,
+        lastModified: new Date().toLocaleDateString(),
+        paperCount: graphData.nodes.length,
+        graphData: graphData,
+      };
+      
+      setActiveProject(tempProject);
       setSelectedPaper(paper);
       setView('WORKSPACE');
+    } catch (error) {
+      console.error('Failed to build graph:', error);
+      alert('Failed to build citation graph. Please try again.');
+    } finally {
       setIsBuilding(false);
-    }, 1000);
+    }
   };
 
   const handleGoToLibrary = () => {
@@ -133,6 +165,81 @@ const handleSearch = async (query: string) => {
     setView('LANDING');
     setActiveProject(null);
     setSelectedPaper(null);
+  };
+
+  const handleSaveToLibrary = async (projectName: string) => {
+    if (!activeProject) return;
+    
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    console.log('[Save] Starting save to library...', { apiUrl, projectName });
+    
+    try {
+      // 1. Create project
+      console.log('[Save] Creating project...');
+      const projectResponse = await fetch(`${apiUrl}/api/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: projectName,
+          description: `Citation graph with ${activeProject.graphData.nodes.length} papers`,
+        }),
+      });
+      
+      if (!projectResponse.ok) {
+        const errorText = await projectResponse.text();
+        console.error('[Save] Failed to create project:', errorText);
+        throw new Error('Failed to create project');
+      }
+      
+      const { project } = await projectResponse.json();
+      console.log('[Save] Project created:', project.id);
+    
+      // 2. Save graph data
+      console.log('[Save] Saving graph data...');
+      const graphResponse = await fetch(`${apiUrl}/api/projects/${project.id}/graph`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nodes: activeProject.graphData.nodes.map(node => ({
+            id: node.id,
+            title: node.title,
+            authors: node.authors,
+            year: node.year,
+            citationCount: node.citationCount,
+            abstract: node.abstract || '',
+            isPrimary: node.isPrimary || false,
+            doi: node.doi || '',
+            pdfUrl: node.pdfUrl || '',
+            arxivId: node.arxivId || '',
+          })),
+          edges: activeProject.graphData.links.map(link => ({
+            // D3 may have converted source/target to objects, handle both cases
+            source: typeof link.source === 'object' ? (link.source as any).id : link.source,
+            target: typeof link.target === 'object' ? (link.target as any).id : link.target,
+          })),
+        }),
+      });
+      
+      if (!graphResponse.ok) {
+        const errorText = await graphResponse.text();
+        console.error('[Save] Failed to save graph:', errorText);
+        throw new Error('Failed to save graph');
+      }
+      
+      console.log('[Save] Graph saved successfully!');
+      
+      // 3. Update active project with saved ID
+      setActiveProject({
+        ...activeProject,
+        id: project.id,
+        name: projectName,
+      });
+      
+      console.log('[Save] Complete! Project ID:', project.id);
+    } catch (error) {
+      console.error('[Save] Error:', error);
+      throw error;
+    }
   };
 
   return (
@@ -220,6 +327,9 @@ const handleSearch = async (query: string) => {
             selectedPaper={selectedPaper} 
             showPlan={showPlan}
             onTogglePlan={() => setShowPlan(!showPlan)}
+            currentProject={activeProject}
+            onSaveToLibrary={handleSaveToLibrary}
+            graphData={activeProject.graphData}
           />
         </div>
       )}
