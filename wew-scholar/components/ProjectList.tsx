@@ -75,21 +75,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
         </div>
       </div>
       
-      {/* Background Stats */}
-      <div className="mt-32 pt-16 border-t border-slate-100 flex flex-wrap gap-16 justify-center opacity-40">
-        <div className="text-center">
-          <div className="mono text-3xl font-light text-slate-900">4,281</div>
-          <div className="text-[9px] uppercase tracking-widest font-bold text-slate-400 mt-1">Total Citations Indexed</div>
-        </div>
-        <div className="text-center">
-          <div className="mono text-3xl font-light text-slate-900">128MB</div>
-          <div className="text-[9px] uppercase tracking-widest font-bold text-slate-400 mt-1">Graph Storage Used</div>
-        </div>
-        <div className="text-center">
-          <div className="mono text-3xl font-light text-slate-900">14ms</div>
-          <div className="text-[9px] uppercase tracking-widest font-bold text-slate-400 mt-1">Traversal Latency</div>
-        </div>
-      </div>
+
     </div>
   );
 };

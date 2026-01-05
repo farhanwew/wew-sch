@@ -5,9 +5,10 @@ import * as d3 from 'd3';
 interface LandingPageProps {
   onSearch: (query: string) => void;
   onGoToLibrary: () => void;
+  isLoading?: boolean;
 }
 
-const LandingPage: React.FC<LandingPageProps> = ({ onSearch, onGoToLibrary }) => {
+const LandingPage: React.FC<LandingPageProps> = ({ onSearch, onGoToLibrary, isLoading = false }) => {
   const [query, setQuery] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -91,7 +92,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onSearch, onGoToLibrary }) =>
            <div className="w-8 h-8 bg-teal-900 rounded-sm flex items-center justify-center">
              <div className="w-3.5 h-3.5 border border-white rotate-45"></div>
            </div>
-           <span className="text-sm font-bold tracking-tight text-slate-800 uppercase">NexusScholar</span>
+           <span className="text-sm font-bold tracking-tight text-slate-800 uppercase">WewScholar</span>
         </div>
         <div className="flex items-center gap-8">
            <button onClick={onGoToLibrary} className="text-xs font-bold uppercase tracking-widest text-slate-500 hover:text-slate-900 transition-colors">Library</button>
@@ -103,7 +104,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onSearch, onGoToLibrary }) =>
       {/* Main Search Content */}
       <div className="relative z-10 w-full max-w-4xl px-8 text-center -mt-16">
         <h1 className="text-[52px] md:text-[64px] font-bold text-slate-900 tracking-tight leading-[1.1] mb-14 antialiased">
-          Explore academic papers<br />in a visual graph
+          Explore academic papers<br />in an interactive way
         </h1>
 
         <form onSubmit={handleSubmit} className="relative max-w-3xl mx-auto mb-10">
@@ -117,9 +118,13 @@ const LandingPage: React.FC<LandingPageProps> = ({ onSearch, onGoToLibrary }) =>
             />
             <button 
               type="submit"
-              className="bg-[#004e7c] text-white px-10 py-4 rounded-full font-bold text-[15px] hover:bg-[#003d61] transition-all whitespace-nowrap shadow-sm"
+              disabled={isLoading}
+              className="bg-[#004e7c] text-white px-10 py-4 rounded-full font-bold text-[15px] hover:bg-[#003d61] transition-all whitespace-nowrap shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              Build a graph
+              {isLoading && (
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              )}
+              {isLoading ? 'Searching...' : 'Search Papers'}
             </button>
           </div>
         </form>

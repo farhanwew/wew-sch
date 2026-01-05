@@ -5,15 +5,17 @@ import GraphView from './components/GraphView';
 import Sidebar from './components/Sidebar';
 import ProjectList from './components/ProjectList';
 import LandingPage from './components/LandingPage';
+import SearchResults from './components/SearchResults';
+import PaperDetail from './components/PaperDetail';
 import { MOCK_PROJECTS } from './constants';
 
-type AppView = 'LANDING' | 'LIBRARY' | 'WORKSPACE';
+type AppView = 'LANDING' | 'SEARCH_RESULTS' | 'PAPER_DETAIL' | 'LIBRARY' | 'WORKSPACE';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>(() => {
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get('view') as AppView;
-    return (viewParam && ['LANDING', 'LIBRARY', 'WORKSPACE'].includes(viewParam)) ? viewParam : 'LANDING';
+    return (viewParam && ['LANDING', 'SEARCH_RESULTS', 'PAPER_DETAIL', 'LIBRARY', 'WORKSPACE'].includes(viewParam)) ? viewParam : 'LANDING';
   });
 
   const [activeProject, setActiveProject] = useState<Project | null>(() => {
@@ -33,6 +35,13 @@ const App: React.FC = () => {
   });
   
   const [showPlan, setShowPlan] = useState<boolean>(false);
+  
+  // New states for search flow
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchResults, setSearchResults] = useState<Paper[]>([]);
+  const [previewPaper, setPreviewPaper] = useState<Paper | null>(null);
+  const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [isBuilding, setIsBuilding] = useState<boolean>(false);
 
   // Sync state to URL
   useEffect(() => {
@@ -59,10 +68,59 @@ const App: React.FC = () => {
     setView('WORKSPACE');
   };
 
-  const handleSearch = (query: string) => {
+const handleSearch = async (query: string) => {
     console.log("Searching for:", query);
-    // Open first mock project as search result simulation
-    handleProjectSelect(MOCK_PROJECTS[0]);
+    setSearchQuery(query);
+    setIsSearching(true);
+    setView('SEARCH_RESULTS');
+    
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    
+    try {
+      const response = await fetch(
+        `${apiUrl}/api/search?query=${encodeURIComponent(query)}`
+      );
+      
+      if (!response.ok) {
+        throw new Error('Search failed');
+      }
+      
+      const data = await response.json();
+      setSearchResults(data.papers);
+    } catch (error) {
+      console.error('Search failed:', error);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSelectSearchResult = (paper: Paper) => {
+    setPreviewPaper(paper);
+    setView('PAPER_DETAIL');
+  };
+
+  const handleBackToSearchResults = () => {
+    setView('SEARCH_RESULTS');
+    setPreviewPaper(null);
+  };
+
+  const handleBuildGraph = (paper: Paper) => {
+    setIsBuilding(true);
+    console.log("Building graph for:", paper.title);
+    
+    // Simulate graph building - replace with actual API call later
+    setTimeout(() => {
+      // Find the project containing this paper, or use first project
+      const project = MOCK_PROJECTS.find(p => 
+        p.graphData.nodes.some(n => n.id === paper.id)
+      ) || MOCK_PROJECTS[0];
+      
+      setActiveProject(project);
+      setSelectedPaper(paper);
+      setView('WORKSPACE');
+      setIsBuilding(false);
+    }, 1000);
   };
 
   const handleGoToLibrary = () => {
@@ -88,7 +146,7 @@ const App: React.FC = () => {
                 <div className="w-3.5 h-3.5 border border-white rotate-45"></div>
               </div>
               <div className="flex flex-col">
-                <h1 className="text-lg font-bold tracking-tight text-slate-900 leading-none antialiased">NexusScholar</h1>
+                <h1 className="text-lg font-bold tracking-tight text-slate-900 leading-none antialiased">WewScholar</h1>
                 <span className="text-[8px] uppercase tracking-[0.3em] text-slate-400 font-extrabold mt-1">Workspace</span>
               </div>
             </div>
@@ -115,9 +173,32 @@ const App: React.FC = () => {
         </header>
       )}
 
-      {/* Main Views */}
+{/* Main Views */}
       {view === 'LANDING' && (
         <LandingPage onSearch={handleSearch} onGoToLibrary={handleGoToLibrary} />
+      )}
+
+      {view === 'SEARCH_RESULTS' && (
+        <main className="w-full h-full overflow-y-auto animate-in fade-in duration-700">
+          <SearchResults
+            query={searchQuery}
+            papers={searchResults}
+            onSelectPaper={handleSelectSearchResult}
+            onBackToSearch={handleBackToLanding}
+            isLoading={isSearching}
+          />
+        </main>
+      )}
+
+      {view === 'PAPER_DETAIL' && previewPaper && (
+        <main className="w-full h-full overflow-y-auto animate-in fade-in duration-700">
+          <PaperDetail
+            paper={previewPaper}
+            onBack={handleBackToSearchResults}
+            onBuildGraph={handleBuildGraph}
+            isBuilding={isBuilding}
+          />
+        </main>
       )}
 
       {view === 'LIBRARY' && (

@@ -36,3 +36,8 @@ export interface ArchitecturePlan {
   description: string;
   golangTools: string[];
 }
+
+export interface SearchResult {
+  query: string;
+  papers: Paper[];
+}
