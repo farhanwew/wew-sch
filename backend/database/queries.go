@@ -7,10 +7,70 @@ import (
 	"github.com/google/uuid"
 )
 
+// ============ User Queries ============
+
+type User struct {
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"-"`
+	Name         string    `json:"name"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+func GetUserByEmail(email string) (*User, error) {
+	var u User
+	err := DB.QueryRow(`
+		SELECT id, email, password_hash, name, created_at, updated_at 
+		FROM users WHERE email = $1
+	`, email).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Name, &u.CreatedAt, &u.UpdatedAt)
+
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func GetUserByID(id string) (*User, error) {
+	var u User
+	err := DB.QueryRow(`
+		SELECT id, email, password_hash, name, created_at, updated_at 
+		FROM users WHERE id = $1
+	`, id).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Name, &u.CreatedAt, &u.UpdatedAt)
+
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func CreateUser(email, passwordHash, name string) (*User, error) {
+	id := uuid.New().String()
+	now := time.Now()
+
+	_, err := DB.Exec(`
+		INSERT INTO users (id, email, password_hash, name, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, id, email, passwordHash, name, now, now)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &User{
+		ID:        id,
+		Email:     email,
+		Name:      name,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
+}
+
 // ============ Project Queries ============
 
 type Project struct {
 	ID          string    `json:"id"`
+	UserID      *string   `json:"userId,omitempty"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	PaperCount  int       `json:"paperCount"`
@@ -20,7 +80,7 @@ type Project struct {
 
 func GetAllProjects() ([]Project, error) {
 	rows, err := DB.Query(`
-		SELECT id, name, description, paper_count, created_at, updated_at 
+		SELECT id, user_id, name, description, paper_count, created_at, updated_at 
 		FROM projects 
 		ORDER BY updated_at DESC
 	`)
@@ -32,7 +92,36 @@ func GetAllProjects() ([]Project, error) {
 	var projects []Project
 	for rows.Next() {
 		var p Project
-		err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.PaperCount, &p.CreatedAt, &p.UpdatedAt)
+		err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.PaperCount, &p.CreatedAt, &p.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		projects = append(projects, p)
+	}
+
+	if projects == nil {
+		projects = []Project{}
+	}
+
+	return projects, nil
+}
+
+func GetProjectsByUserID(userID string) ([]Project, error) {
+	rows, err := DB.Query(`
+		SELECT id, user_id, name, description, paper_count, created_at, updated_at 
+		FROM projects 
+		WHERE user_id = $1
+		ORDER BY updated_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var projects []Project
+	for rows.Next() {
+		var p Project
+		err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.PaperCount, &p.CreatedAt, &p.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -49,9 +138,9 @@ func GetAllProjects() ([]Project, error) {
 func GetProjectByID(id string) (*Project, error) {
 	var p Project
 	err := DB.QueryRow(`
-		SELECT id, name, description, paper_count, created_at, updated_at 
-		FROM projects WHERE id = ?
-	`, id).Scan(&p.ID, &p.Name, &p.Description, &p.PaperCount, &p.CreatedAt, &p.UpdatedAt)
+		SELECT id, user_id, name, description, paper_count, created_at, updated_at 
+		FROM projects WHERE id = $1
+	`, id).Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.PaperCount, &p.CreatedAt, &p.UpdatedAt)
 
 	if err != nil {
 		return nil, err
@@ -59,14 +148,14 @@ func GetProjectByID(id string) (*Project, error) {
 	return &p, nil
 }
 
-func CreateProject(name, description string) (*Project, error) {
+func CreateProject(name, description string, userID *string) (*Project, error) {
 	id := uuid.New().String()
 	now := time.Now()
 
 	_, err := DB.Exec(`
-		INSERT INTO projects (id, name, description, paper_count, created_at, updated_at)
-		VALUES (?, ?, ?, 0, ?, ?)
-	`, id, name, description, now, now)
+		INSERT INTO projects (id, user_id, name, description, paper_count, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 0, $5, $6)
+	`, id, userID, name, description, now, now)
 
 	if err != nil {
 		return nil, err
@@ -74,6 +163,7 @@ func CreateProject(name, description string) (*Project, error) {
 
 	return &Project{
 		ID:          id,
+		UserID:      userID,
 		Name:        name,
 		Description: description,
 		PaperCount:  0,
@@ -84,13 +174,13 @@ func CreateProject(name, description string) (*Project, error) {
 
 func UpdateProject(id, name, description string) error {
 	_, err := DB.Exec(`
-		UPDATE projects SET name = ?, description = ?, updated_at = ? WHERE id = ?
+		UPDATE projects SET name = $1, description = $2, updated_at = $3 WHERE id = $4
 	`, name, description, time.Now(), id)
 	return err
 }
 
 func DeleteProject(id string) error {
-	_, err := DB.Exec(`DELETE FROM projects WHERE id = ?`, id)
+	_, err := DB.Exec(`DELETE FROM projects WHERE id = $1`, id)
 	return err
 }
 
@@ -113,7 +203,7 @@ type SavedPaper struct {
 func GetPapersByProjectID(projectID string) ([]SavedPaper, error) {
 	rows, err := DB.Query(`
 		SELECT id, project_id, paper_id, title, authors, year, abstract, citation_count, doi, is_primary, created_at
-		FROM saved_papers WHERE project_id = ? ORDER BY created_at DESC
+		FROM saved_papers WHERE project_id = $1 ORDER BY created_at DESC
 	`, projectID)
 	if err != nil {
 		return nil, err
@@ -156,7 +246,7 @@ func AddPaperToProject(projectID string, paper SavedPaper) (*SavedPaper, error) 
 
 	_, err := DB.Exec(`
 		INSERT INTO saved_papers (id, project_id, paper_id, title, authors, year, abstract, citation_count, doi, is_primary, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`, id, projectID, paper.PaperID, paper.Title, string(authorsJSON), paper.Year, paper.Abstract, paper.CitationCount, paper.DOI, isPrimary, now)
 
 	if err != nil {
@@ -164,7 +254,7 @@ func AddPaperToProject(projectID string, paper SavedPaper) (*SavedPaper, error) 
 	}
 
 	// Update paper count
-	DB.Exec(`UPDATE projects SET paper_count = paper_count + 1, updated_at = ? WHERE id = ?`, now, projectID)
+	DB.Exec(`UPDATE projects SET paper_count = paper_count + 1, updated_at = $1 WHERE id = $2`, now, projectID)
 
 	paper.ID = id
 	paper.ProjectID = projectID
@@ -173,13 +263,13 @@ func AddPaperToProject(projectID string, paper SavedPaper) (*SavedPaper, error) 
 }
 
 func RemovePaperFromProject(projectID, paperID string) error {
-	_, err := DB.Exec(`DELETE FROM saved_papers WHERE project_id = ? AND id = ?`, projectID, paperID)
+	_, err := DB.Exec(`DELETE FROM saved_papers WHERE project_id = $1 AND id = $2`, projectID, paperID)
 	if err != nil {
 		return err
 	}
 
 	// Update paper count
-	DB.Exec(`UPDATE projects SET paper_count = paper_count - 1, updated_at = ? WHERE id = ?`, time.Now(), projectID)
+	DB.Exec(`UPDATE projects SET paper_count = paper_count - 1, updated_at = $1 WHERE id = $2`, time.Now(), projectID)
 	return nil
 }
 
@@ -218,7 +308,7 @@ func GetGraphByProjectID(projectID string) (*GraphData, error) {
 
 	err := DB.QueryRow(`
 		SELECT id, project_id, nodes, edges, created_at, updated_at
-		FROM graph_data WHERE project_id = ?
+		FROM graph_data WHERE project_id = $1
 	`, projectID).Scan(&g.ID, &g.ProjectID, &nodesJSON, &edgesJSON, &g.CreatedAt, &g.UpdatedAt)
 
 	if err != nil {
@@ -238,16 +328,15 @@ func SaveGraphData(projectID string, nodes []GraphNode, edges []GraphEdge) (*Gra
 	nodesJSON, _ := json.Marshal(nodes)
 	edgesJSON, _ := json.Marshal(edges)
 
-	// Upsert - insert or replace
+	// PostgreSQL upsert using ON CONFLICT
 	_, err := DB.Exec(`
-		INSERT OR REPLACE INTO graph_data (id, project_id, nodes, edges, created_at, updated_at)
-		VALUES (
-			COALESCE((SELECT id FROM graph_data WHERE project_id = ?), ?),
-			?, ?, ?, 
-			COALESCE((SELECT created_at FROM graph_data WHERE project_id = ?), ?),
-			?
-		)
-	`, projectID, id, projectID, string(nodesJSON), string(edgesJSON), projectID, now, now)
+		INSERT INTO graph_data (id, project_id, nodes, edges, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (project_id) DO UPDATE SET
+			nodes = EXCLUDED.nodes,
+			edges = EXCLUDED.edges,
+			updated_at = EXCLUDED.updated_at
+	`, id, projectID, string(nodesJSON), string(edgesJSON), now, now)
 
 	if err != nil {
 		return nil, err

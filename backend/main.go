@@ -34,28 +34,36 @@ func main() {
 	}
 	r.Use(cors.New(config))
 
+	// Auth routes (public)
+	r.POST("/api/auth/register", handlers.RegisterHandler)
+	r.POST("/api/auth/login", handlers.LoginHandler)
+	r.GET("/api/auth/me", handlers.AuthMiddleware(), handlers.GetMeHandler)
+
 	// Routes
 	// Search
 	r.GET("/api/search", handlers.SearchPapersHandler)
 
-	// Paper & Graph
+	// Paper & Graph (public - for viewing)
 	r.GET("/api/paper/:id", handlers.GetPaperHandler)
 	r.GET("/api/paper/:id/graph", handlers.BuildGraphHandler)
+	r.GET("/api/paper/:id/deep-graph", handlers.BuildDeepGraphHandler)
 
-	// Projects (Library)
-	r.GET("/api/projects", handlers.GetProjectsHandler)
-	r.POST("/api/projects", handlers.CreateProjectHandler)
+	// Projects - GET uses optional auth (returns user's projects if logged in)
+	r.GET("/api/projects", handlers.OptionalAuthMiddleware(), handlers.GetProjectsHandler)
 	r.GET("/api/projects/:id", handlers.GetProjectHandler)
-	r.PUT("/api/projects/:id", handlers.UpdateProjectHandler)
-	r.DELETE("/api/projects/:id", handlers.DeleteProjectHandler)
-
-	// Project Papers
-	r.POST("/api/projects/:id/papers", handlers.AddPaperToProjectHandler)
-	r.DELETE("/api/projects/:id/papers/:paperId", handlers.RemovePaperFromProjectHandler)
-
-	// Project Graph
-	r.POST("/api/projects/:id/graph", handlers.SaveGraphHandler)
 	r.GET("/api/projects/:id/graph", handlers.GetGraphHandler)
+
+	// Projects - Protected routes (require auth)
+	authProjects := r.Group("/api/projects")
+	authProjects.Use(handlers.AuthMiddleware())
+	{
+		authProjects.POST("", handlers.CreateProjectHandler)
+		authProjects.PUT("/:id", handlers.UpdateProjectHandler)
+		authProjects.DELETE("/:id", handlers.DeleteProjectHandler)
+		authProjects.POST("/:id/papers", handlers.AddPaperToProjectHandler)
+		authProjects.DELETE("/:id/papers/:paperId", handlers.RemovePaperFromProjectHandler)
+		authProjects.POST("/:id/graph", handlers.SaveGraphHandler)
+	}
 
 	// Get port from environment or default to 8000
 	port := os.Getenv("PORT")

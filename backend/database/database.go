@@ -5,24 +5,19 @@ import (
 	"log"
 	"os"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/lib/pq"
 )
 
 var DB *sql.DB
 
 func InitDB() {
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = "data/wewscholar.db"
-	}
-
-	// Ensure data directory exists
-	if err := os.MkdirAll("data", 0755); err != nil {
-		log.Fatal("[DB] Failed to create data directory:", err)
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = "postgres://wewscholar:wewscholar_secret@localhost:5432/wewscholar?sslmode=disable"
 	}
 
 	var err error
-	DB, err = sql.Open("sqlite3", dbPath)
+	DB, err = sql.Open("postgres", databaseURL)
 	if err != nil {
 		log.Fatal("[DB] Failed to open database:", err)
 	}
@@ -32,7 +27,7 @@ func InitDB() {
 		log.Fatal("[DB] Failed to ping database:", err)
 	}
 
-	log.Println("[DB] Connected to SQLite:", dbPath)
+	log.Println("[DB] Connected to PostgreSQL")
 
 	// Run migrations
 	if err = RunMigrations(); err != nil {

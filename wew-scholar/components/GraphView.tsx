@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3';
 import { GraphData, Paper } from '../types';
 
@@ -13,6 +13,47 @@ const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode }) => {
   const simulationRef = useRef<d3.Simulation<any, undefined> | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [matchingNodes, setMatchingNodes] = useState<Set<string>>(new Set());
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const selectedNodeIdRef = useRef<string | null>(null);
+
+  // Keep ref in sync with state for use in D3 callbacks
+  useEffect(() => {
+    selectedNodeIdRef.current = selectedNodeId;
+  }, [selectedNodeId]);
+
+  // Function to clear selection
+  const handleClearSelection = useCallback(() => {
+    setSelectedNodeId(null);
+    if (svgRef.current) {
+      // Reset ALL nodes to default style - select first circle in each node group
+      d3.select(svgRef.current).selectAll('.nodes g').each(function() {
+        d3.select(this).select('circle')
+          .attr('stroke', '#1e293b')
+          .attr('stroke-width', 3)
+          .attr('fill', '#ffffff');
+      });
+    }
+  }, []);
+
+  // Handle undo with Ctrl+Z or clicking on already selected node
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSearchQuery('');
+        setMatchingNodes(new Set());
+        handleClearSelection();
+      }
+      // Ctrl+Z or Cmd+Z to undo selection
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        handleClearSelection();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleClearSelection]);
 
   const handleResetPositions = () => {
     if (!simulationRef.current) return;
@@ -40,6 +81,76 @@ const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode }) => {
     d3.select(svgRef.current).transition().duration(750).call(zoomRef.current.transform, d3.zoomIdentity);
   };
 
+  // Search/filter nodes
+  const handleSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setMatchingNodes(new Set());
+      return;
+    }
+    
+    const lowerQuery = query.toLowerCase();
+    const matches = new Set<string>();
+    
+    data.nodes.forEach(node => {
+      const titleMatch = node.title.toLowerCase().includes(lowerQuery);
+      const authorMatch = node.authors.some(a => a.toLowerCase().includes(lowerQuery));
+      const yearMatch = node.year.toString().includes(query);
+      
+      if (titleMatch || authorMatch || yearMatch) {
+        matches.add(node.id);
+      }
+    });
+    
+    setMatchingNodes(matches);
+  }, [data.nodes]);
+
+  // Update node styles when search changes
+  useEffect(() => {
+    if (!svgRef.current) return;
+    
+    const svg = d3.select(svgRef.current);
+    const currentSelectedId = selectedNodeIdRef.current;
+    
+    if (matchingNodes.size === 0 && !searchQuery) {
+      // Reset all nodes to normal opacity
+      svg.selectAll('.nodes g')
+        .style('opacity', 1);
+      
+      // Reset stroke for non-selected nodes only
+      svg.selectAll('.nodes g').each(function(d: any) {
+        if (d.id !== currentSelectedId) {
+          d3.select(this).select('circle')
+            .attr('stroke', '#1e293b')
+            .attr('stroke-width', 3);
+        }
+      });
+    } else if (matchingNodes.size > 0) {
+      // Highlight matching nodes, dim others
+      svg.selectAll('.nodes g')
+        .style('opacity', (d: any) => matchingNodes.has(d.id) ? 1 : 0.2);
+      
+      svg.selectAll('.nodes g').each(function(d: any) {
+        if (d.id !== currentSelectedId) {
+          d3.select(this).select('circle')
+            .attr('stroke', matchingNodes.has(d.id) ? '#f59e0b' : '#1e293b')
+            .attr('stroke-width', matchingNodes.has(d.id) ? 4 : 3);
+        }
+      });
+      
+      // Dim links that don't connect to matching nodes
+      svg.selectAll('.links line')
+        .style('opacity', (d: any) => 
+          matchingNodes.has(d.source.id) || matchingNodes.has(d.target.id) ? 0.4 : 0.1
+        );
+    } else {
+      // Query exists but no matches - dim everything
+      svg.selectAll('.nodes g').style('opacity', 0.2);
+      svg.selectAll('.links line').style('opacity', 0.1);
+    }
+  }, [matchingNodes, searchQuery]);
+
+  // Update node styles when search changes
   useEffect(() => {
     if (!svgRef.current || !data.nodes.length) return;
 
@@ -145,16 +256,34 @@ const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode }) => {
       .attr("class", "cursor-grab active:cursor-grabbing")
       .call(drag(simulation) as any)
       .on("click", (event, d: any) => {
-        onSelectNode(d);
-        node.selectAll("circle.main-circle")
-          .attr("stroke", "#1a1a1a")
-          .attr("stroke-width", 3)
-          .attr("fill", "#ffffff");
+        // Prevent drag from triggering click
+        if (event.defaultPrevented) return;
         
-        d3.select(event.currentTarget).select("circle.main-circle")
-          .attr("stroke-width", 5)
-          .attr("stroke", "#3b82f6")
-          .attr("fill", "#eff6ff");
+        // Toggle selection: if clicking on already selected node, deselect it
+        const currentSelectedId = selectedNodeIdRef.current;
+        
+        // First, ALWAYS reset ALL nodes to default style (clear any previous selection)
+        g.selectAll(".nodes g").each(function() {
+          d3.select(this).select("circle")
+            .attr("stroke", "#1e293b")
+            .attr("stroke-width", 3)
+            .attr("fill", "#ffffff");
+        });
+        
+        if (currentSelectedId === d.id) {
+          // Deselect - clicking on same node again
+          setSelectedNodeId(null);
+        } else {
+          // Select new node (only one at a time)
+          setSelectedNodeId(d.id);
+          onSelectNode(d);
+          
+          // Highlight ONLY the selected node
+          d3.select(event.currentTarget).select("circle")
+            .attr("stroke-width", 5)
+            .attr("stroke", "#3b82f6")
+            .attr("fill", "#eff6ff");
+        }
       })
       .on("mouseover", (event, d: any) => {
         // Scale ONLY the circle, not the group (better performance)
@@ -188,12 +317,11 @@ const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode }) => {
       });
 
     node.append("circle")
-      .attr("class", "main-circle")
+      .attr("class", "main-circle transition-all shadow-md hover:shadow-xl")
       .attr("r", (d: any) => d.isPrimary ? 20 : 18)
       .attr("fill", "#ffffff")
       .attr("stroke", "#1e293b")
-      .attr("stroke-width", 3)
-      .attr("class", "transition-all shadow-md hover:shadow-xl");
+      .attr("stroke-width", 3);
 
     // Blue Pinned Indicator
     node.append("circle")
@@ -253,6 +381,9 @@ const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode }) => {
       }
       function dragended(event: any) {
         if (!event.active) simulation.alphaTarget(0);
+        // Unpin the node after drag ends - remove fixed position
+        event.subject.fx = null;
+        event.subject.fy = null;
       }
       return d3.drag()
         .on("start", dragstarted)
@@ -286,15 +417,45 @@ const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode }) => {
       <div className="absolute top-16 left-10 flex flex-col gap-4 pointer-events-auto">
          <div className="flex items-center gap-3 bg-white/80 backdrop-blur-md border border-slate-200 rounded-full px-5 py-3 shadow-sm min-w-[320px]">
             <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-            <input type="text" placeholder="Add papers to the graph..." className="bg-transparent text-sm w-full outline-none text-slate-700 font-semibold" />
+            <input 
+              type="text" 
+              placeholder="Filter papers by title, author, year..." 
+              className="bg-transparent text-sm w-full outline-none text-slate-700 font-semibold placeholder:font-normal" 
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+            />
+            {searchQuery && (
+              <button 
+                onClick={() => { setSearchQuery(''); setMatchingNodes(new Set()); }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
          </div>
+         {searchQuery && (
+           <div className="bg-white/80 backdrop-blur-md border border-slate-200 rounded-full px-5 py-2 text-xs font-medium text-slate-500 w-max shadow-sm">
+             {matchingNodes.size} of {data.nodes.length} papers match
+           </div>
+         )}
          <button 
-           onClick={handleResetPositions}
-           className="bg-white/80 backdrop-blur-md border border-slate-200 rounded-full px-6 py-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 hover:text-slate-900 transition-all flex items-center gap-3 w-max shadow-sm"
-         >
-           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m0 0H15"/></svg>
-           Reset Positions
-         </button>
+            onClick={handleResetPositions}
+            className="bg-white/80 backdrop-blur-md border border-slate-200 rounded-full px-6 py-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 hover:text-slate-900 transition-all flex items-center gap-3 w-max shadow-sm"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m0 0H15"/></svg>
+            Reset Positions
+          </button>
+          {selectedNodeId && (
+            <button 
+              onClick={handleClearSelection}
+              className="bg-blue-50 backdrop-blur-md border border-blue-200 rounded-full px-6 py-3 text-[10px] font-bold uppercase tracking-[0.2em] text-blue-600 hover:bg-blue-100 hover:text-blue-800 transition-all flex items-center gap-3 w-max shadow-sm"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+              Undo Selection (Ctrl+Z)
+            </button>
+          )}
       </div>
 
       {/* Floating Toolbar Sidebar */}

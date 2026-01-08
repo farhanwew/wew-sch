@@ -1,4 +1,22 @@
 services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=wewscholar
+      - POSTGRES_PASSWORD=wewscholar_secret
+      - POSTGRES_DB=wewscholar
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wewscholar -d wewscholar"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   # Backend API (Go)
   backend:
     build:
@@ -11,9 +29,11 @@ services:
       - CORS_ORIGINS=http://localhost,http://localhost:80,http://frontend
       - GIN_MODE=release
       - S2_API_KEY=${S2_API_KEY:-}
-      - DB_PATH=/app/data/wewscholar.db
-    volumes:
-      - sqlite_data:/app/data
+      - DATABASE_URL=postgres://wewscholar:wewscholar_secret@postgres:5432/wewscholar?sslmode=disable
+      - JWT_SECRET=${JWT_SECRET:-super-secret-jwt-key-change-in-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/api/projects"]
@@ -35,5 +55,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  sqlite_data:
+  postgres_data:
     driver: local

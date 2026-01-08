@@ -2,6 +2,8 @@
 import React, { useState } from 'react';
 import { Paper, Project, GraphData } from '../types';
 import { ARCHITECTURE_PLAN } from '../constants';
+import { useAuth } from '../contexts/AuthContext';
+import AuthModal from './AuthModal';
 
 interface SidebarProps {
   selectedPaper: Paper | null;
@@ -23,6 +25,22 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  const { isAuthenticated } = useAuth();
+
+  const handleSaveClick = () => {
+    if (!isAuthenticated) {
+      setShowAuthModal(true);
+    } else {
+      setShowSaveModal(true);
+    }
+  };
+
+  const handleAuthSuccess = () => {
+    // After successful login, show the save modal
+    setShowSaveModal(true);
+  };
 
   const handleSave = async () => {
     if (!projectName.trim()) return;
@@ -181,13 +199,13 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="pt-10 space-y-3">
                {isUnsaved && (
                  <button 
-                   onClick={() => setShowSaveModal(true)}
+                   onClick={handleSaveClick}
                    className="w-full py-3 text-sm font-semibold text-white bg-teal-600 rounded hover:bg-teal-700 transition-colors flex items-center justify-center gap-2"
                  >
                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
                    </svg>
-                   Save to Library
+                   {isAuthenticated ? 'Save to Library' : 'Sign in to Save'}
                  </button>
                )}
                {!isUnsaved && currentProject && (
@@ -242,6 +260,13 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
       </div>
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={handleAuthSuccess}
+      />
 
       {/* Save Modal */}
       {showSaveModal && (

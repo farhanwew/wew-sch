@@ -1,6 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Project, Paper } from '../types';
+import { authFetch } from '../contexts/AuthContext';
 
 interface ProjectListProps {
   onSelectProject: (project: Project) => void;
@@ -33,6 +34,9 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [loadingProjectId, setLoadingProjectId] = useState<string | null>(null);
+  const [editingProject, setEditingProject] = useState<APIProject | null>(null);
+  const [editName, setEditName] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     fetchProjects();
@@ -41,7 +45,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
   const fetchProjects = async () => {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     try {
-      const response = await fetch(`${apiUrl}/api/projects`);
+      const response = await authFetch(`${apiUrl}/api/projects`);
       if (response.ok) {
         const data = await response.json();
         setProjects(data.projects || []);
@@ -113,7 +117,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
     setDeletingId(projectId);
     
     try {
-      const response = await fetch(`${apiUrl}/api/projects/${projectId}`, {
+      const response = await authFetch(`${apiUrl}/api/projects/${projectId}`, {
         method: 'DELETE',
       });
       
@@ -129,6 +133,47 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
       alert('Failed to delete project. Please try again.');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleEditProject = (e: React.MouseEvent, project: APIProject) => {
+    e.stopPropagation();
+    setEditingProject(project);
+    setEditName(project.name);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingProject || !editName.trim()) return;
+    
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    setIsSaving(true);
+    
+    try {
+      const response = await authFetch(`${apiUrl}/api/projects/${editingProject.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim(),
+          description: editingProject.description,
+        }),
+      });
+      
+      if (response.ok) {
+        setProjects(projects.map(p => 
+          p.id === editingProject.id 
+            ? { ...p, name: editName.trim(), updatedAt: new Date().toISOString() }
+            : p
+        ));
+        setEditingProject(null);
+        setEditName('');
+      } else {
+        alert('Failed to update project. Please try again.');
+      }
+    } catch (error) {
+      console.error('Failed to update project:', error);
+      alert('Failed to update project. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -180,6 +225,17 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-900"></div>
                 </div>
               )}
+              
+              {/* Edit button */}
+              <button
+                onClick={(e) => handleEditProject(e, project)}
+                className="absolute top-4 right-14 z-10 w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 transition-all shadow-sm"
+                title="Edit project"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+              </button>
               
               {/* Delete button */}
               <button
@@ -243,6 +299,51 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
               <p className="text-slate-400 text-lg">No projects yet. Search for a paper and build your first citation graph!</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editingProject && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 w-[400px] shadow-2xl">
+            <h3 className="serif text-2xl text-slate-900 mb-2">Rename Project</h3>
+            <p className="text-slate-500 text-sm mb-6">
+              Give your research project a new name.
+            </p>
+            
+            <input
+              type="text"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              placeholder="Project name"
+              className="w-full px-4 py-3 border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-6"
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
+            />
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setEditingProject(null); setEditName(''); }}
+                className="flex-1 py-3 text-sm font-semibold text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={!editName.trim() || isSaving}
+                className="flex-1 py-3 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSaving ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

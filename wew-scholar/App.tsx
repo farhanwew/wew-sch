@@ -7,7 +7,9 @@ import ProjectList from './components/ProjectList';
 import LandingPage from './components/LandingPage';
 import SearchResults from './components/SearchResults';
 import PaperDetail from './components/PaperDetail';
+import AuthModal from './components/AuthModal';
 import { MOCK_PROJECTS } from './constants';
+import { useAuth, authFetch } from './contexts/AuthContext';
 
 type AppView = 'LANDING' | 'SEARCH_RESULTS' | 'PAPER_DETAIL' | 'LIBRARY' | 'WORKSPACE';
 
@@ -42,6 +44,11 @@ const App: React.FC = () => {
   const [previewPaper, setPreviewPaper] = useState<Paper | null>(null);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [isBuilding, setIsBuilding] = useState<boolean>(false);
+
+  // Auth state
+  const { user, isAuthenticated, logout } = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   // Sync state to URL
   useEffect(() => {
@@ -105,16 +112,19 @@ const handleSearch = async (query: string) => {
     setPreviewPaper(null);
   };
 
-  const handleBuildGraph = async (paper: Paper) => {
+  const handleBuildGraph = async (paper: Paper, useDeepGraph: boolean = false) => {
     setIsBuilding(true);
-    console.log("Building graph for:", paper.title);
+    console.log("Building graph for:", paper.title, useDeepGraph ? "(deep)" : "(simple)");
     
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     
     try {
-      const response = await fetch(
-        `${apiUrl}/api/paper/${paper.id}/graph?citations=20&references=20`
-      );
+      // Use deep-graph endpoint for inter-connections, or regular graph for simple view
+      const endpoint = useDeepGraph 
+        ? `${apiUrl}/api/paper/${paper.id}/deep-graph?citations=15&references=15`
+        : `${apiUrl}/api/paper/${paper.id}/graph?citations=20&references=20`;
+      
+      const response = await fetch(endpoint);
       
       if (!response.ok) {
         throw new Error('Failed to build graph');
@@ -174,11 +184,10 @@ const handleSearch = async (query: string) => {
     console.log('[Save] Starting save to library...', { apiUrl, projectName });
     
     try {
-      // 1. Create project
+      // 1. Create project (requires auth)
       console.log('[Save] Creating project...');
-      const projectResponse = await fetch(`${apiUrl}/api/projects`, {
+      const projectResponse = await authFetch(`${apiUrl}/api/projects`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: projectName,
           description: `Citation graph with ${activeProject.graphData.nodes.length} papers`,
@@ -194,11 +203,10 @@ const handleSearch = async (query: string) => {
       const { project } = await projectResponse.json();
       console.log('[Save] Project created:', project.id);
     
-      // 2. Save graph data
+      // 2. Save graph data (requires auth)
       console.log('[Save] Saving graph data...');
-      const graphResponse = await fetch(`${apiUrl}/api/projects/${project.id}/graph`, {
+      const graphResponse = await authFetch(`${apiUrl}/api/projects/${project.id}/graph`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           nodes: activeProject.graphData.nodes.map(node => ({
             id: node.id,
@@ -271,10 +279,41 @@ const handleSearch = async (query: string) => {
               >
                 My Library
               </button>
-              <div className="h-4 w-[1px] bg-slate-200"></div>
-              <div className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center hover:bg-slate-200 transition-colors cursor-pointer border border-slate-200 shadow-sm">
-                 <svg className="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-              </div>
+<div className="h-4 w-[1px] bg-slate-200"></div>
+              {isAuthenticated ? (
+                <div className="relative">
+                  <button 
+                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    className="w-9 h-9 bg-teal-600 rounded-full flex items-center justify-center hover:bg-teal-700 transition-colors cursor-pointer border border-teal-700 shadow-sm text-white font-medium text-sm"
+                  >
+                    {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
+                  </button>
+                  {showUserMenu && (
+                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-2 z-50">
+                      <div className="px-4 py-2 border-b border-slate-100">
+                        <p className="text-sm font-medium text-slate-900">{user?.name || 'User'}</p>
+                        <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          logout();
+                          setShowUserMenu(false);
+                        }}
+                        className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                      >
+                        Sign Out
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="px-4 py-2 text-sm font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 transition-colors"
+                >
+                  Sign In
+                </button>
+              )}
             </nav>
           </div>
         </header>
@@ -333,6 +372,12 @@ const handleSearch = async (query: string) => {
           />
         </div>
       )}
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+      />
     </div>
   );
 };

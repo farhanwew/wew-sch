@@ -81,6 +81,13 @@ type S2PaperWithCitations struct {
 	References []S2Paper `json:"references"`
 }
 
+// S2PaperBatchItem is used for batch API responses which include citations/references
+type S2PaperBatchItem struct {
+	S2Paper
+	Citations  []S2Paper `json:"citations,omitempty"`
+	References []S2Paper `json:"references,omitempty"`
+}
+
 // ToPaperWithGraph converts S2 response to our graph structure
 func (p S2PaperWithCitations) ToPaperWithGraph(citationLimit, referenceLimit int) *PaperWithGraph {
 	// Primary paper as first node

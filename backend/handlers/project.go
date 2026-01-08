@@ -10,7 +10,20 @@ import (
 
 // GET /api/projects
 func GetProjectsHandler(c *gin.Context) {
-	projects, err := database.GetAllProjects()
+	// If user is authenticated, get their projects
+	// Otherwise, return empty (or could return public projects)
+	userID, exists := c.Get("userID")
+
+	var projects []database.Project
+	var err error
+
+	if exists && userID != nil {
+		projects, err = database.GetProjectsByUserID(userID.(string))
+	} else {
+		// Return empty for unauthenticated users
+		projects = []database.Project{}
+	}
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -54,7 +67,15 @@ func CreateProjectHandler(c *gin.Context) {
 		return
 	}
 
-	project, err := database.CreateProject(req.Name, req.Description)
+	// Get userID from context (set by AuthMiddleware)
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required to create projects"})
+		return
+	}
+
+	userIDStr := userID.(string)
+	project, err := database.CreateProject(req.Name, req.Description, &userIDStr)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -72,13 +93,36 @@ type UpdateProjectRequest struct {
 func UpdateProjectHandler(c *gin.Context) {
 	id := c.Param("id")
 
+	// Get userID from context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	// Check project ownership
+	project, err := database.GetProjectByID(id)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if project.UserID == nil || *project.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to update this project"})
+		return
+	}
+
 	var req UpdateProjectRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Name is required"})
 		return
 	}
 
-	err := database.UpdateProject(id, req.Name, req.Description)
+	err = database.UpdateProject(id, req.Name, req.Description)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -91,7 +135,30 @@ func UpdateProjectHandler(c *gin.Context) {
 func DeleteProjectHandler(c *gin.Context) {
 	id := c.Param("id")
 
-	err := database.DeleteProject(id)
+	// Get userID from context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	// Check project ownership
+	project, err := database.GetProjectByID(id)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if project.UserID == nil || *project.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to delete this project"})
+		return
+	}
+
+	err = database.DeleteProject(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -114,6 +181,29 @@ type AddPaperRequest struct {
 
 func AddPaperToProjectHandler(c *gin.Context) {
 	projectID := c.Param("id")
+
+	// Get userID from context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	// Check project ownership
+	project, err := database.GetProjectByID(projectID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if project.UserID == nil || *project.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to modify this project"})
+		return
+	}
 
 	var req AddPaperRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -146,7 +236,30 @@ func RemovePaperFromProjectHandler(c *gin.Context) {
 	projectID := c.Param("id")
 	paperID := c.Param("paperId")
 
-	err := database.RemovePaperFromProject(projectID, paperID)
+	// Get userID from context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	// Check project ownership
+	project, err := database.GetProjectByID(projectID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if project.UserID == nil || *project.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to modify this project"})
+		return
+	}
+
+	err = database.RemovePaperFromProject(projectID, paperID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -163,6 +276,29 @@ type SaveGraphRequest struct {
 
 func SaveGraphHandler(c *gin.Context) {
 	projectID := c.Param("id")
+
+	// Get userID from context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	// Check project ownership
+	project, err := database.GetProjectByID(projectID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if project.UserID == nil || *project.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to modify this project"})
+		return
+	}
 
 	var req SaveGraphRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
