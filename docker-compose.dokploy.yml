@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wewscholar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-wewscholar}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wewscholar} -d ${POSTGRES_DB:-wewscholar}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    image: ghcr.io/${GHCR_OWNER}/graph-paper-backend:${APP_IMAGE_TAG:-latest}
+    environment:
+      PORT: 8000
+      GIN_MODE: release
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      S2_API_KEY: ${S2_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://${POSTGRES_USER:-wewscholar}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-wewscholar}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/api/projects"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/${GHCR_OWNER}/graph-paper-frontend:${APP_IMAGE_TAG:-latest}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
