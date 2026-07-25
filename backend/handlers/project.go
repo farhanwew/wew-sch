@@ -4,28 +4,43 @@ import (
 	"backend/database"
 	"database/sql"
 	"net/http"
+	"regexp"
 
 	"github.com/gin-gonic/gin"
 )
 
+var projectIDRegex = regexp.MustCompile(`^[a-zA-Z0-9-]{1,64}$`)
+
+func validateProjectID(c *gin.Context, param string) bool {
+	val := c.Param(param)
+	if val == "" || !projectIDRegex.MatchString(val) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID format"})
+		c.Abort()
+		return false
+	}
+	return true
+}
+
 // GET /api/projects
 func GetProjectsHandler(c *gin.Context) {
-	// If user is authenticated, get their projects
-	// Otherwise, return empty (or could return public projects)
 	userID, exists := c.Get("userID")
 
 	var projects []database.Project
 	var err error
 
 	if exists && userID != nil {
-		projects, err = database.GetProjectsByUserID(userID.(string))
+		projectType := c.Query("type") // optional: "auto" or "custom"
+		if projectType != "" {
+			projects, err = database.GetProjectsByUserIDAndType(userID.(string), projectType)
+		} else {
+			projects, err = database.GetProjectsByUserID(userID.(string))
+		}
 	} else {
-		// Return empty for unauthenticated users
 		projects = []database.Project{}
 	}
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"projects": projects})
@@ -33,6 +48,9 @@ func GetProjectsHandler(c *gin.Context) {
 
 // GET /api/projects/:id
 func GetProjectHandler(c *gin.Context) {
+	if !validateProjectID(c, "id") {
+		return
+	}
 	id := c.Param("id")
 
 	project, err := database.GetProjectByID(id)
@@ -41,8 +59,17 @@ func GetProjectHandler(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch project"})
 		return
+	}
+
+	// Enforce ownership if project belongs to a user
+	userID, _ := c.Get("userID")
+	if project.UserID != nil {
+		if userID == nil || userID.(string) != *project.UserID {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+			return
+		}
 	}
 
 	// Get papers for this project
@@ -58,6 +85,7 @@ func GetProjectHandler(c *gin.Context) {
 type CreateProjectRequest struct {
 	Name        string `json:"name" binding:"required"`
 	Description string `json:"description"`
+	ProjectType string `json:"projectType"` // "auto" or "custom", defaults to "auto"
 }
 
 func CreateProjectHandler(c *gin.Context) {
@@ -74,10 +102,15 @@ func CreateProjectHandler(c *gin.Context) {
 		return
 	}
 
+	projectType := req.ProjectType
+	if projectType != "auto" && projectType != "custom" {
+		projectType = "auto"
+	}
+
 	userIDStr := userID.(string)
-	project, err := database.CreateProject(req.Name, req.Description, &userIDStr)
+	project, err := database.CreateProject(req.Name, req.Description, projectType, &userIDStr)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -91,6 +124,9 @@ type UpdateProjectRequest struct {
 }
 
 func UpdateProjectHandler(c *gin.Context) {
+	if !validateProjectID(c, "id") {
+		return
+	}
 	id := c.Param("id")
 
 	// Get userID from context
@@ -107,7 +143,7 @@ func UpdateProjectHandler(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -124,7 +160,7 @@ func UpdateProjectHandler(c *gin.Context) {
 
 	err = database.UpdateProject(id, req.Name, req.Description)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -133,6 +169,9 @@ func UpdateProjectHandler(c *gin.Context) {
 
 // DELETE /api/projects/:id
 func DeleteProjectHandler(c *gin.Context) {
+	if !validateProjectID(c, "id") {
+		return
+	}
 	id := c.Param("id")
 
 	// Get userID from context
@@ -149,7 +188,7 @@ func DeleteProjectHandler(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -160,7 +199,7 @@ func DeleteProjectHandler(c *gin.Context) {
 
 	err = database.DeleteProject(id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -180,6 +219,9 @@ type AddPaperRequest struct {
 }
 
 func AddPaperToProjectHandler(c *gin.Context) {
+	if !validateProjectID(c, "id") {
+		return
+	}
 	projectID := c.Param("id")
 
 	// Get userID from context
@@ -196,7 +238,7 @@ func AddPaperToProjectHandler(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -224,7 +266,7 @@ func AddPaperToProjectHandler(c *gin.Context) {
 
 	savedPaper, err := database.AddPaperToProject(projectID, paper)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -233,6 +275,9 @@ func AddPaperToProjectHandler(c *gin.Context) {
 
 // DELETE /api/projects/:id/papers/:paperId
 func RemovePaperFromProjectHandler(c *gin.Context) {
+	if !validateProjectID(c, "id") {
+		return
+	}
 	projectID := c.Param("id")
 	paperID := c.Param("paperId")
 
@@ -250,7 +295,7 @@ func RemovePaperFromProjectHandler(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -261,7 +306,7 @@ func RemovePaperFromProjectHandler(c *gin.Context) {
 
 	err = database.RemovePaperFromProject(projectID, paperID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -275,6 +320,9 @@ type SaveGraphRequest struct {
 }
 
 func SaveGraphHandler(c *gin.Context) {
+	if !validateProjectID(c, "id") {
+		return
+	}
 	projectID := c.Param("id")
 
 	// Get userID from context
@@ -291,7 +339,7 @@ func SaveGraphHandler(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -308,19 +356,41 @@ func SaveGraphHandler(c *gin.Context) {
 
 	graphData, err := database.SaveGraphData(projectID, req.Nodes, req.Edges)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
 	// Update project paper count
-	database.DB.Exec(`UPDATE projects SET paper_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, len(req.Nodes), projectID)
+	database.DB.Exec(`UPDATE projects SET paper_count = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, len(req.Nodes), projectID)
 
 	c.JSON(http.StatusCreated, gin.H{"graph": graphData})
 }
 
 // GET /api/projects/:id/graph
 func GetGraphHandler(c *gin.Context) {
+	if !validateProjectID(c, "id") {
+		return
+	}
 	projectID := c.Param("id")
+
+	// Check project ownership before returning graph
+	project, err := database.GetProjectByID(projectID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Graph not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch graph"})
+		return
+	}
+
+	userID, _ := c.Get("userID")
+	if project.UserID != nil {
+		if userID == nil || userID.(string) != *project.UserID {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Graph not found"})
+			return
+		}
+	}
 
 	graphData, err := database.GetGraphByProjectID(projectID)
 	if err == sql.ErrNoRows {
@@ -328,7 +398,7 @@ func GetGraphHandler(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch graph"})
 		return
 	}
 

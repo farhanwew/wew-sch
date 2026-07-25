@@ -3,6 +3,12 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3';
 import { GraphData, Paper } from '../types';
 
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.appendChild(document.createTextNode(text));
+  return div.innerHTML;
+}
+
 interface GraphViewProps {
   data: GraphData;
   onSelectNode: (paper: Paper) => void;
@@ -293,7 +299,7 @@ const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode }) => {
           
         tooltip.transition().duration(200).style("opacity", 1);
         tooltip.html(`
-          <div class="font-bold text-slate-900 text-xs mb-1">${d.title}</div>
+          <div class="font-bold text-slate-900 text-xs mb-1">${escapeHtml(d.title)}</div>
           <div class="text-[10px] text-slate-500 flex gap-2">
             <span>${d.year}</span>
             <span>•</span>

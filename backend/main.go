@@ -3,8 +3,14 @@ package main
 import (
 	"backend/database"
 	"backend/handlers"
+	"context"
+	"log"
+	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -19,6 +25,18 @@ func main() {
 	database.InitDB()
 
 	r := gin.Default()
+
+	// Security headers middleware
+	r.Use(func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-XSS-Protection", "0")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Next()
+	})
+
+	// General rate limiting
+	r.Use(handlers.GeneralRateLimitMiddleware())
 
 	// CORS middleware with configurable origins
 	corsOrigins := os.Getenv("CORS_ORIGINS")
@@ -35,9 +53,10 @@ func main() {
 	r.Use(cors.New(config))
 
 	// Auth routes (public)
-	r.POST("/api/auth/register", handlers.RegisterHandler)
-	r.POST("/api/auth/login", handlers.LoginHandler)
+	r.POST("/api/auth/register", handlers.AuthRateLimitMiddleware(), handlers.RegisterHandler)
+	r.POST("/api/auth/login", handlers.AuthRateLimitMiddleware(), handlers.LoginHandler)
 	r.GET("/api/auth/me", handlers.AuthMiddleware(), handlers.GetMeHandler)
+	r.POST("/api/auth/logout", handlers.LogoutHandler)
 
 	// Routes
 	// Search
@@ -50,8 +69,8 @@ func main() {
 
 	// Projects - GET uses optional auth (returns user's projects if logged in)
 	r.GET("/api/projects", handlers.OptionalAuthMiddleware(), handlers.GetProjectsHandler)
-	r.GET("/api/projects/:id", handlers.GetProjectHandler)
-	r.GET("/api/projects/:id/graph", handlers.GetGraphHandler)
+	r.GET("/api/projects/:id", handlers.OptionalAuthMiddleware(), handlers.GetProjectHandler)
+	r.GET("/api/projects/:id/graph", handlers.OptionalAuthMiddleware(), handlers.GetGraphHandler)
 
 	// Projects - Protected routes (require auth)
 	authProjects := r.Group("/api/projects")
@@ -71,5 +90,31 @@ func main() {
 		port = "8000"
 	}
 
-	r.Run(":" + port)
+	// Graceful shutdown
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
+	}
+
+	go func() {
+		log.Printf("Server starting on :%s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	database.CloseDB()
+	log.Println("Server exited")
 }

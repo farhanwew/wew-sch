@@ -49,6 +49,9 @@ func RunMigrations() error {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
+
+		// Add project_type column (backward-compatible, defaults to 'auto')
+		`ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_type TEXT DEFAULT 'auto'`,
 	}
 
 	for _, migration := range migrations {

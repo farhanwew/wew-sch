@@ -74,14 +74,15 @@ type Project struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	PaperCount  int       `json:"paperCount"`
+	ProjectType string    `json:"projectType"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 func GetAllProjects() ([]Project, error) {
 	rows, err := DB.Query(`
-		SELECT id, user_id, name, description, paper_count, created_at, updated_at 
-		FROM projects 
+		SELECT id, user_id, name, description, paper_count, project_type, created_at, updated_at
+		FROM projects
 		ORDER BY updated_at DESC
 	`)
 	if err != nil {
@@ -92,7 +93,7 @@ func GetAllProjects() ([]Project, error) {
 	var projects []Project
 	for rows.Next() {
 		var p Project
-		err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.PaperCount, &p.CreatedAt, &p.UpdatedAt)
+		err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.PaperCount, &p.ProjectType, &p.CreatedAt, &p.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -108,8 +109,8 @@ func GetAllProjects() ([]Project, error) {
 
 func GetProjectsByUserID(userID string) ([]Project, error) {
 	rows, err := DB.Query(`
-		SELECT id, user_id, name, description, paper_count, created_at, updated_at 
-		FROM projects 
+		SELECT id, user_id, name, description, paper_count, project_type, created_at, updated_at
+		FROM projects
 		WHERE user_id = $1
 		ORDER BY updated_at DESC
 	`, userID)
@@ -121,7 +122,36 @@ func GetProjectsByUserID(userID string) ([]Project, error) {
 	var projects []Project
 	for rows.Next() {
 		var p Project
-		err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.PaperCount, &p.CreatedAt, &p.UpdatedAt)
+		err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.PaperCount, &p.ProjectType, &p.CreatedAt, &p.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		projects = append(projects, p)
+	}
+
+	if projects == nil {
+		projects = []Project{}
+	}
+
+	return projects, nil
+}
+
+func GetProjectsByUserIDAndType(userID, projectType string) ([]Project, error) {
+	rows, err := DB.Query(`
+		SELECT id, user_id, name, description, paper_count, project_type, created_at, updated_at
+		FROM projects
+		WHERE user_id = $1 AND project_type = $2
+		ORDER BY updated_at DESC
+	`, userID, projectType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var projects []Project
+	for rows.Next() {
+		var p Project
+		err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.PaperCount, &p.ProjectType, &p.CreatedAt, &p.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -138,9 +168,9 @@ func GetProjectsByUserID(userID string) ([]Project, error) {
 func GetProjectByID(id string) (*Project, error) {
 	var p Project
 	err := DB.QueryRow(`
-		SELECT id, user_id, name, description, paper_count, created_at, updated_at 
+		SELECT id, user_id, name, description, paper_count, project_type, created_at, updated_at
 		FROM projects WHERE id = $1
-	`, id).Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.PaperCount, &p.CreatedAt, &p.UpdatedAt)
+	`, id).Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.PaperCount, &p.ProjectType, &p.CreatedAt, &p.UpdatedAt)
 
 	if err != nil {
 		return nil, err
@@ -148,14 +178,17 @@ func GetProjectByID(id string) (*Project, error) {
 	return &p, nil
 }
 
-func CreateProject(name, description string, userID *string) (*Project, error) {
+func CreateProject(name, description, projectType string, userID *string) (*Project, error) {
 	id := uuid.New().String()
 	now := time.Now()
+	if projectType == "" {
+		projectType = "auto"
+	}
 
 	_, err := DB.Exec(`
-		INSERT INTO projects (id, user_id, name, description, paper_count, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, 0, $5, $6)
-	`, id, userID, name, description, now, now)
+		INSERT INTO projects (id, user_id, name, description, paper_count, project_type, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 0, $5, $6, $7)
+	`, id, userID, name, description, projectType, now, now)
 
 	if err != nil {
 		return nil, err
@@ -167,6 +200,7 @@ func CreateProject(name, description string, userID *string) (*Project, error) {
 		Name:        name,
 		Description: description,
 		PaperCount:  0,
+		ProjectType: projectType,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}, nil

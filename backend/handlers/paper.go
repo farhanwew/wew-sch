@@ -3,6 +3,7 @@ package handlers
 import (
 	"backend/services"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -10,11 +11,14 @@ import (
 
 // GET /api/paper/:id
 func GetPaperHandler(c *gin.Context) {
+	if !validateParamID(c, "id") {
+		return
+	}
 	paperID := c.Param("id")
 
 	paper, err := services.GetPaperByID(paperID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch paper"})
 		return
 	}
 
@@ -26,6 +30,9 @@ func GetPaperHandler(c *gin.Context) {
 //   - citations: max citations to include (default 20)
 //   - references: max references to include (default 20)
 func BuildGraphHandler(c *gin.Context) {
+	if !validateParamID(c, "id") {
+		return
+	}
 	paperID := c.Param("id")
 
 	// Parse query params with defaults
@@ -53,7 +60,7 @@ func BuildGraphHandler(c *gin.Context) {
 
 	result, err := services.GetPaperWithCitations(paperID, citationLimit, referenceLimit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch paper"})
 		return
 	}
 
@@ -66,6 +73,9 @@ func BuildGraphHandler(c *gin.Context) {
 //   - citations: max citations to include (default 15)
 //   - references: max references to include (default 15)
 func BuildDeepGraphHandler(c *gin.Context) {
+	if !validateParamID(c, "id") {
+		return
+	}
 	paperID := c.Param("id")
 
 	// Parse query params with defaults (lower default for deep graph due to more API calls)
@@ -93,7 +103,7 @@ func BuildDeepGraphHandler(c *gin.Context) {
 
 	result, err := services.GetDeepGraph(paperID, citationLimit, referenceLimit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch paper"})
 		return
 	}
 

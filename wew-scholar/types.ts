@@ -30,6 +30,7 @@ export interface Project {
   lastModified: string;
   paperCount: number;
   graphData: GraphData;
+  projectType?: 'auto' | 'custom';
 }
 
 export interface ArchitecturePlan {

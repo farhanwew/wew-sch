@@ -28,7 +28,7 @@ func SearchPapersHandler(c *gin.Context) {
 
 	result, err := services.SearchPapers(query, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Search failed"})
 		return
 	}
 

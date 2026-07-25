@@ -8,16 +8,17 @@ import LandingPage from './components/LandingPage';
 import SearchResults from './components/SearchResults';
 import PaperDetail from './components/PaperDetail';
 import AuthModal from './components/AuthModal';
+import CustomGraphBuilder from './components/CustomGraphBuilder';
 import { MOCK_PROJECTS } from './constants';
 import { useAuth, authFetch } from './contexts/AuthContext';
 
-type AppView = 'LANDING' | 'SEARCH_RESULTS' | 'PAPER_DETAIL' | 'LIBRARY' | 'WORKSPACE';
+type AppView = 'LANDING' | 'SEARCH_RESULTS' | 'PAPER_DETAIL' | 'LIBRARY' | 'WORKSPACE' | 'CUSTOM_BUILDER';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>(() => {
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get('view') as AppView;
-    return (viewParam && ['LANDING', 'SEARCH_RESULTS', 'PAPER_DETAIL', 'LIBRARY', 'WORKSPACE'].includes(viewParam)) ? viewParam : 'LANDING';
+    return (viewParam && ['LANDING', 'SEARCH_RESULTS', 'PAPER_DETAIL', 'LIBRARY', 'WORKSPACE', 'CUSTOM_BUILDER'].includes(viewParam)) ? viewParam : 'LANDING';
   });
 
   const [activeProject, setActiveProject] = useState<Project | null>(() => {
@@ -72,7 +73,41 @@ const App: React.FC = () => {
   const handleProjectSelect = (project: Project) => {
     setActiveProject(project);
     setSelectedPaper(project.graphData.nodes[0] || null);
-    setView('WORKSPACE');
+    if (project.projectType === 'custom') {
+      setView('CUSTOM_BUILDER');
+    } else {
+      setView('WORKSPACE');
+    }
+  };
+
+  const handleCreateCustomGraph = async () => {
+    if (!isAuthenticated) {
+      setShowAuthModal(true);
+      return;
+    }
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    try {
+      const res = await authFetch(`${apiUrl}/api/projects`, {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Untitled Graph', description: '', projectType: 'custom' }),
+      });
+      if (!res.ok) throw new Error('Failed to create project');
+      const { project } = await res.json();
+      const newProject: Project = {
+        id: project.id,
+        name: project.name,
+        description: project.description,
+        lastModified: new Date().toLocaleDateString(),
+        paperCount: 0,
+        graphData: { nodes: [], links: [] },
+        projectType: 'custom',
+      };
+      setActiveProject(newProject);
+      setSelectedPaper(null);
+      setView('CUSTOM_BUILDER');
+    } catch (error) {
+      console.error('Failed to create custom graph:', error);
+    }
   };
 
 const handleSearch = async (query: string) => {
@@ -152,6 +187,7 @@ const handleSearch = async (query: string) => {
         lastModified: new Date().toLocaleDateString(),
         paperCount: graphData.nodes.length,
         graphData: graphData,
+        projectType: 'auto',
       };
       
       setActiveProject(tempProject);
@@ -349,8 +385,21 @@ const handleSearch = async (query: string) => {
 
       {view === 'LIBRARY' && (
         <main className="w-full h-full overflow-y-auto pt-20 animate-in fade-in duration-700">
-          <ProjectList onSelectProject={handleProjectSelect} />
+          <ProjectList
+            onSelectProject={handleProjectSelect}
+            onCreateCustomGraph={handleCreateCustomGraph}
+          />
         </main>
+      )}
+
+      {view === 'CUSTOM_BUILDER' && activeProject && (
+        <div className="w-full h-full pt-16 animate-in fade-in duration-700">
+          <CustomGraphBuilder
+            project={activeProject}
+            onProjectUpdate={(updated) => setActiveProject(updated)}
+            onBack={handleGoToLibrary}
+          />
+        </div>
       )}
 
       {view === 'WORKSPACE' && activeProject && (

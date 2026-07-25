@@ -17,14 +17,14 @@ var jwtSecret []byte
 func init() {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		secret = "your-secret-key-change-in-production"
+		panic("JWT_SECRET environment variable is required and must not be empty")
 	}
 	jwtSecret = []byte(secret)
 }
 
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	Password string `json:"password" binding:"required,min=8"`
 	Name     string `json:"name"`
 }
 
@@ -34,61 +34,114 @@ type LoginRequest struct {
 }
 
 type AuthResponse struct {
-	Token string        `json:"token"`
-	User  database.User `json:"user"`
+	User database.User `json:"user"`
 }
 
-// Generate JWT token
+func setAuthCookie(c *gin.Context, token string) {
+	c.SetCookie(
+		"auth_token",
+		token,
+		int(time.Hour*24*7/time.Second),
+		"/",
+		"",
+		false,
+		true,
+	)
+	c.SetSameSite(http.SameSiteStrictMode)
+}
+
 func generateToken(userID string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID,
-		"exp":     time.Now().Add(time.Hour * 24 * 7).Unix(), // 7 days
+		"exp":     time.Now().Add(time.Hour * 24 * 7).Unix(),
 		"iat":     time.Now().Unix(),
+		"iss":     "graph-paper",
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(jwtSecret)
 }
 
+func parseTokenString(tokenString string) (string, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return jwtSecret, nil
+	})
+	if err != nil || !token.Valid {
+		return "", jwt.ErrSignatureInvalid
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", jwt.ErrSignatureInvalid
+	}
+
+	userID, ok := claims["user_id"].(string)
+	if !ok {
+		return "", jwt.ErrSignatureInvalid
+	}
+
+	return userID, nil
+}
+
+func extractToken(c *gin.Context) string {
+	if cookie, err := c.Cookie("auth_token"); err == nil && cookie != "" {
+		return cookie
+	}
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		parts := strings.Split(authHeader, " ")
+		if len(parts) == 2 && parts[0] == "Bearer" {
+			return parts[1]
+		}
+	}
+
+	return ""
+}
+
 // POST /api/auth/register
 func RegisterHandler(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
 
-	// Check if user exists
+	if req.Name == "" {
+		req.Name = strings.Split(req.Email, "@")[0]
+	}
+
 	existing, _ := database.GetUserByEmail(req.Email)
 	if existing != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Email already registered"})
 		return
 	}
 
-	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 		return
 	}
 
-	// Create user
 	user, err := database.CreateUser(req.Email, string(hashedPassword), req.Name)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
 
-	// Generate token
 	token, err := generateToken(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
 
+	setAuthCookie(c, token)
+
 	c.JSON(http.StatusCreated, AuthResponse{
-		Token: token,
-		User:  *user,
+		User: *user,
 	})
 }
 
@@ -100,29 +153,27 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	// Get user
 	user, err := database.GetUserByEmail(req.Email)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
 
-	// Check password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
 
-	// Generate token
 	token, err := generateToken(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
 
+	setAuthCookie(c, token)
+
 	c.JSON(http.StatusOK, AuthResponse{
-		Token: token,
-		User:  *user,
+		User: *user,
 	})
 }
 
@@ -143,98 +194,53 @@ func GetMeHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
-// JWT Auth Middleware
+// POST /api/auth/logout
+func LogoutHandler(c *gin.Context) {
+	c.SetCookie(
+		"auth_token",
+		"",
+		-1,
+		"/",
+		"",
+		false,
+		true,
+	)
+	c.JSON(http.StatusOK, gin.H{"message": "Logged out"})
+}
+
+// AuthMiddleware requires a valid JWT token (via cookie or Authorization header)
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
+		tokenString := extractToken(c)
+		if tokenString == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 			c.Abort()
 			return
 		}
 
-		// Extract token from "Bearer <token>"
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authorization header format"})
-			c.Abort()
-			return
-		}
-
-		tokenString := parts[1]
-
-		// Parse and validate token
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
-			}
-			return jwtSecret, nil
-		})
-
-		if err != nil || !token.Valid {
+		userID, err := parseTokenString(tokenString)
+		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()
 			return
 		}
 
-		// Extract user ID from claims
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
-			c.Abort()
-			return
-		}
-
-		userID, ok := claims["user_id"].(string)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid user ID in token"})
-			c.Abort()
-			return
-		}
-
-		// Set user ID in context for handlers to use
 		c.Set("userID", userID)
 		c.Next()
 	}
 }
 
-// Optional Auth Middleware - doesn't block, just sets userID if token is valid
+// OptionalAuthMiddleware sets userID in context if token is valid, but doesn't block
 func OptionalAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		tokenString := extractToken(c)
+		if tokenString == "" {
 			c.Next()
 			return
 		}
 
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.Next()
-			return
-		}
-
-		tokenString := parts[1]
-
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
-			}
-			return jwtSecret, nil
-		})
-
-		if err != nil || !token.Valid {
-			c.Next()
-			return
-		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			c.Next()
-			return
-		}
-
-		userID, ok := claims["user_id"].(string)
-		if ok {
+		userID, err := parseTokenString(tokenString)
+		if err == nil {
 			c.Set("userID", userID)
 		}
 

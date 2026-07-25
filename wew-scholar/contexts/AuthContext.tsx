@@ -22,49 +22,36 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'));
+  const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch current user on mount if token exists
   useEffect(() => {
     const fetchUser = async () => {
-      if (!token) {
-        setIsLoading(false);
-        return;
-      }
-
       try {
         const response = await fetch(`${API_URL}/api/auth/me`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
+          credentials: 'include',
         });
 
         if (response.ok) {
           const data = await response.json();
           setUser(data.user);
-        } else {
-          // Token invalid, clear it
-          localStorage.removeItem('auth_token');
-          setToken(null);
         }
       } catch (error) {
         console.error('Failed to fetch user:', error);
-        localStorage.removeItem('auth_token');
-        setToken(null);
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchUser();
-  }, [token]);
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     const response = await fetch(`${API_URL}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
+      credentials: 'include',
     });
 
     if (!response.ok) {
@@ -75,7 +62,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const data = await response.json();
     setToken(data.token);
     setUser(data.user);
-    localStorage.setItem('auth_token', data.token);
   }, []);
 
   const register = useCallback(async (email: string, password: string, name: string) => {
@@ -83,6 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, name }),
+      credentials: 'include',
     });
 
     if (!response.ok) {
@@ -93,13 +80,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const data = await response.json();
     setToken(data.token);
     setUser(data.user);
-    localStorage.setItem('auth_token', data.token);
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    await fetch(`${API_URL}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
     setToken(null);
     setUser(null);
-    localStorage.removeItem('auth_token');
   }, []);
 
   return (
@@ -127,14 +116,8 @@ export const useAuth = () => {
   return context;
 };
 
-// Helper function for authenticated API calls
 export const authFetch = async (url: string, options: RequestInit = {}) => {
-  const token = localStorage.getItem('auth_token');
-  
   const headers = new Headers(options.headers);
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
   if (!headers.has('Content-Type') && options.body) {
     headers.set('Content-Type', 'application/json');
   }
@@ -142,5 +125,6 @@ export const authFetch = async (url: string, options: RequestInit = {}) => {
   return fetch(url, {
     ...options,
     headers,
+    credentials: 'include',
   });
 };

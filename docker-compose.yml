@@ -3,13 +3,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      - POSTGRES_USER=wewscholar
-      - POSTGRES_PASSWORD=wewscholar_secret
-      - POSTGRES_DB=wewscholar
+      - POSTGRES_USER=${POSTGRES_USER:-wewscholar}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-wewscholar_secret}
+      - POSTGRES_DB=${POSTGRES_DB:-wewscholar}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U wewscholar -d wewscholar"]
@@ -29,8 +29,8 @@ services:
       - CORS_ORIGINS=http://localhost,http://localhost:80,http://frontend
       - GIN_MODE=release
       - S2_API_KEY=${S2_API_KEY:-}
-      - DATABASE_URL=postgres://wewscholar:wewscholar_secret@postgres:5432/wewscholar?sslmode=disable
-      - JWT_SECRET=${JWT_SECRET:-super-secret-jwt-key-change-in-production}
+      - DATABASE_URL=postgres://${POSTGRES_USER:-wewscholar}:${POSTGRES_PASSWORD:-wewscholar_secret}@postgres:5432/${POSTGRES_DB:-wewscholar}?sslmode=disable
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
     depends_on:
       postgres:
         condition: service_healthy

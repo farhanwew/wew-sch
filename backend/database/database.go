@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"os"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -13,7 +14,7 @@ var DB *sql.DB
 func InitDB() {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		databaseURL = "postgres://wewscholar:wewscholar_secret@localhost:5432/wewscholar?sslmode=disable"
+		log.Fatal("[DB] DATABASE_URL environment variable is required")
 	}
 
 	var err error
@@ -21,6 +22,11 @@ func InitDB() {
 	if err != nil {
 		log.Fatal("[DB] Failed to open database:", err)
 	}
+
+	// Configure connection pool
+	DB.SetMaxOpenConns(25)
+	DB.SetMaxIdleConns(5)
+	DB.SetConnMaxLifetime(5 * time.Minute)
 
 	// Test connection
 	if err = DB.Ping(); err != nil {
